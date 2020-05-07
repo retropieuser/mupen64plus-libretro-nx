@@ -57,6 +57,7 @@
 #include "libretro_memory.h"
 
 #include "audio_plugin.h"
+#include "debugger/gdbstub.h"
 
 #ifndef CORE_NAME
 #define CORE_NAME "mupen64plus"
@@ -220,7 +221,7 @@ extern struct
 int pad_pak_types[4];
 int pad_present[4] = {1, 1, 1, 1};
 
-static void n64DebugCallback(void* aContext, int aLevel, const char* aMessage)
+void n64DebugCallback(void* aContext, int aLevel, const char* aMessage)
 {
     char buffer[1024];
     snprintf(buffer, 1024, CORE_NAME ": %s\n", aMessage);
@@ -312,6 +313,8 @@ static void* EmuThreadFunction(void* param)
 
     initializing = false;
 
+    GDBStub_Init(1338);
+    
     // Runs until CMD_STOP
     CoreDoCommand(M64CMD_EXECUTE, 0, NULL);
 
