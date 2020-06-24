@@ -21,6 +21,7 @@
 
 #include "tlb.h"
 #include <mupen64plus-next_common.h>
+#include <debugger/gdbstub.h>
 
 #include "api/m64p_types.h"
 #include "device/r4300/r4300_core.h"
@@ -143,11 +144,13 @@ uint32_t virtual_to_physical_address(struct r4300_core* r4300, uint32_t address,
 
     if(IgnoreTLBExceptions == 0) {
         /* False, Default Behaviour */
+        debugger_update(*r4300_pc(r4300));
         TLB_refill_exception(r4300, address, w);
     } else if(IgnoreTLBExceptions == 1) {
         /* OnlyNotEnabled */
         if(using_tlb)
         {
+            debugger_update(*r4300_pc(r4300));
             TLB_refill_exception(r4300, address, w);
         }
     } else if(IgnoreTLBExceptions == 2)
