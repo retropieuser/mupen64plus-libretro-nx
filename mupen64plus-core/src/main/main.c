@@ -72,6 +72,7 @@
 #include "savestates.h"
 #include "screenshot.h"
 #include "util.h"
+#include "netplay.h"
 
 #include <libretro_private.h>
 #include <libco.h>
@@ -115,6 +116,8 @@ struct cheat_ctx g_cheat_ctx;
  * Initialization and DeInitialization of this variable is done at CoreStartup and CoreShutdown.
  */
 void* g_mem_base = NULL;
+
+uint32_t g_start_address = UINT32_C(0xa4000040);
 
 struct device g_dev;
 
@@ -218,6 +221,9 @@ int main_set_core_defaults(void)
 
 void main_speeddown(int percent)
 {
+    if (netplay_is_init())
+        return;
+
     if (l_SpeedFactor - percent > 10)  /* 10% minimum speed */
     {
         l_SpeedFactor -= percent;
@@ -228,6 +234,9 @@ void main_speeddown(int percent)
 
 void main_speedup(int percent)
 {
+    if (netplay_is_init())
+        return;
+
     if (l_SpeedFactor + percent < 300) /* 300% maximum speed */
     {
         l_SpeedFactor += percent;
@@ -238,6 +247,9 @@ void main_speedup(int percent)
 
 static void main_speedset(int percent)
 {
+    if (netplay_is_init())
+        return;
+
     if (percent < 1 || percent > 1000)
     {
         DebugMessage(M64MSG_WARNING, "Invalid speed setting %i percent", percent);
@@ -253,6 +265,9 @@ static void main_speedset(int percent)
 
 void main_set_fastforward(int enable)
 {
+    if (netplay_is_init())
+        return;
+
     static int ff_state = 0;
     static int SavedSpeedFactor = 100;
 
@@ -276,6 +291,9 @@ void main_set_fastforward(int enable)
 
 static void main_set_speedlimiter(int enable)
 {
+    if (netplay_is_init() && !netplay_lag())
+        return;
+
     l_MainSpeedLimit = enable ? 1 : 0;
 }
 
@@ -287,6 +305,9 @@ static int main_is_paused(void)
 void main_toggle_pause(void)
 {
     if (!g_EmulatorRunning)
+        return;
+
+    if (netplay_is_init())
         return;
 
     if (g_rom_pause)
@@ -341,6 +362,9 @@ void main_state_inc_slot(void)
 
 void main_state_load(const char *filename)
 {
+    if (netplay_is_init())
+        return;
+
     if (filename == NULL) // Save to slot
         savestates_set_job(savestates_job_load, savestates_type_m64p, NULL);
     else
@@ -349,6 +373,9 @@ void main_state_load(const char *filename)
 
 void main_state_save(int format, const char *filename)
 {
+    if (netplay_is_init())
+        return;
+
     if (filename == NULL) // Save to slot
         savestates_set_job(savestates_job_save, savestates_type_m64p, NULL);
     else // Save to file
@@ -599,6 +626,9 @@ static void apply_speed_limiter(void)
 /* TODO: make a GameShark module and move that there */
 static void gs_apply_cheats(struct cheat_ctx* ctx)
 {
+    if (netplay_is_init())
+        return;
+
     struct r4300_core* r4300 = &g_dev.r4300;
 
     if (g_gs_vi_counter < 60)
@@ -636,6 +666,7 @@ void new_vi(void)
 
     main_check_inputs();
 
+    netplay_check_sync(&g_dev.r4300.cp0);
     retro_return();
 }
 
@@ -1002,21 +1033,21 @@ extern audio_plugin_functions dummy_audio;
 
 unsigned int r4300_emumode;
 
-uint32_t rdram_size;
-struct file_storage eep;
-struct file_storage fla;
-struct file_storage sra;
-struct file_storage dd_disk;
-size_t dd_rom_size;
-
 m64p_error main_run(void)
 {
     size_t i, k;
-    unsigned int count_per_op;
-    unsigned int disable_extra_mem;
-    int si_dma_duration;
-    int no_compiled_jump;
-    int randomize_interrupt;
+    size_t rdram_size;
+    uint32_t count_per_op;
+    uint32_t emumode;
+    uint32_t disable_extra_mem;
+    int32_t si_dma_duration;
+    int32_t no_compiled_jump;
+    int32_t randomize_interrupt;
+    struct file_storage eep;
+    struct file_storage fla;
+    struct file_storage sra;
+    size_t dd_rom_size;
+    struct file_storage dd_disk;
     struct audio_out_backend_interface audio_out_backend_libretro;
 
     int control_ids[GAME_CONTROLLERS_COUNT];
@@ -1029,8 +1060,9 @@ m64p_error main_run(void)
     const struct video_capture_backend_interface* igbcam_backend;
 
     /* XXX: select type of flashram from db */
-    uint32_t flashram_type = MX29L1100_ID;
-
+    uint32_t flashram_type = MX29L1100_ID
+    
+    randomize_interrupt = 0; // We don't want this right now
     count_per_op = CountPerOp;
     disable_extra_mem = ROM_PARAMS.disableextramem;
 
@@ -1043,6 +1075,9 @@ m64p_error main_run(void)
         count_per_op = ROM_PARAMS.countperop;
 
     si_dma_duration = ROM_PARAMS.sidmaduration;
+
+    //During netplay, player 1 is the source of truth for these settings
+    netplay_sync_settings(&count_per_op, &disable_extra_mem, &si_dma_duration, &emumode, &no_compiled_jump);
 
     cheat_add_hacks(&g_cheat_ctx, ROM_PARAMS.cheats);
 
@@ -1120,9 +1155,13 @@ m64p_error main_run(void)
     memset(&l_gb_carts_data, 0, GAME_CONTROLLERS_COUNT*sizeof(*l_gb_carts_data));
     memset(cin_compats, 0, GAME_CONTROLLERS_COUNT*sizeof(*cin_compats));
 
+    netplay_read_registration(cin_compats);
+
     for (i = 0; i < GAME_CONTROLLERS_COUNT; ++i) {
 
-        control_ids[i] = (int)i;
+        //During netplay, we "trick" the input plugin
+        //by replacing the regular control_id with the ID that is controlling the player during netplay
+        control_ids[i] = netplay_is_init() ? netplay_get_controller(i) : (int)i;
 
         /* if input plugin requests RawData let the input plugin do the channel device processing */
         if (Controls[i].RawData) {
@@ -1145,6 +1184,9 @@ m64p_error main_run(void)
             cin_compats[i].cont = &g_dev.controllers[i];
             cin_compats[i].tpk = &g_dev.transferpaks[i];
             cin_compats[i].last_pak_type = Controls[i].Plugin;
+            cin_compats[i].last_input = 0;
+            cin_compats[i].netplay_count = 0;
+            cin_compats[i].event_first = NULL;
 
             l_gb_carts_data[i].control_id = (int)i;
 
@@ -1253,6 +1295,7 @@ m64p_error main_run(void)
                 count_per_op,
                 no_compiled_jump,
                 randomize_interrupt,
+                g_start_address,
                 &g_dev.ai, &audio_out_backend_libretro,
                 si_dma_duration,
                 rdram_size,
@@ -1381,4 +1424,35 @@ void main_stop(void)
     }
 
     stop_device(&g_dev);
+}
+
+m64p_error open_pif(const unsigned char* pifimage, unsigned int size)
+{
+    md5_byte_t pif_ntsc_md5[] = {0x49, 0x21, 0xD5, 0xF2, 0x16, 0x5D, 0xEE, 0x6E, 0x24, 0x96, 0xF4, 0x38, 0x8C, 0x4C, 0x81, 0xDA};
+    md5_byte_t pif_pal_md5[]  = {0x2B, 0x6E, 0xEC, 0x58, 0x6F, 0xAA, 0x43, 0xF3, 0x46, 0x23, 0x33, 0xB8, 0x44, 0x83, 0x45, 0x54};
+
+    uint32_t *dst32 = mem_base_u32(g_mem_base, MM_PIF_MEM);
+    uint32_t *src32 = (uint32_t*) pifimage;
+    md5_state_t state;
+    md5_byte_t digest[16];
+
+    md5_init(&state);
+    md5_append(&state, (const md5_byte_t*)pifimage, size);
+    md5_finish(&state, digest);
+
+    if (memcmp(digest, pif_ntsc_md5, 16) == 0)
+        DebugMessage(M64MSG_INFO, "Using NTSC PIF ROM");
+    else if (memcmp(digest, pif_pal_md5, 16) == 0)
+        DebugMessage(M64MSG_INFO, "Using PAL PIF ROM");
+    else
+    {
+        DebugMessage(M64MSG_ERROR, "Invalid PIF ROM");
+        return M64ERR_INPUT_INVALID;
+    }
+
+    for (int i = 0; i < size; i += 4)
+        *dst32++ = big32(*src32++);
+
+    g_start_address = UINT32_C(0xbfc00000);
+    return M64ERR_SUCCESS;
 }
