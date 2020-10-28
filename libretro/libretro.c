@@ -153,13 +153,12 @@ bool retro_savestate_complete = false;
 int  retro_savestate_result = 0;
 
 // 64DD globals
-char* retro_dd_path_img;
-char* retro_dd_path_rom;
+char* retro_dd_path_img = NULL;
+char* retro_dd_path_rom = NULL;
 
 // Other Subsystems
-char* retro_transferpak_rom_path;
-char* retro_transferpak_ram_path;
-
+char* retro_transferpak_rom_path = NULL;
+char* retro_transferpak_ram_path = NULL;
 
 uint32_t bilinearMode = 0;
 uint32_t EnableHybridFilter = 0;
