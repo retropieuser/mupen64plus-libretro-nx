@@ -494,7 +494,7 @@ ifeq ($(DEBUG), 1)
    CPUOPTS += -O0 -g
    CPUOPTS += -DOPENGL_DEBUG
 else
-   CPUOPTS += -DNDEBUG -fsigned-char -ffast-math -fno-strict-aliasing -fomit-frame-pointer -fvisibility=hidden -Wno-discarded-qualifiers
+   CPUOPTS += -DNDEBUG -fsigned-char -ffast-math -fno-strict-aliasing -fomit-frame-pointer -fvisibility=hidden
 ifneq ($(platform), libnx)
    CPUOPTS := -O3 $(CPUOPTS)
 endif
@@ -505,7 +505,7 @@ endif
 CPUOPTS += -fcommon
 
 # set C/C++ standard to use
-CFLAGS += -std=gnu11 -D_CRT_SECURE_NO_WARNINGS
+CFLAGS += -std=gnu11 -D_CRT_SECURE_NO_WARNINGS -Wno-discarded-qualifiers
 CXXFLAGS += -std=gnu++11 -D_CRT_SECURE_NO_WARNINGS
 
 ifeq ($(HAVE_LTCG),1)
