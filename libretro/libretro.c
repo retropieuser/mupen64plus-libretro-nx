@@ -377,6 +377,10 @@ void retro_set_input_state(retro_input_state_t cb) { input_cb = cb; }
 
 bool retro_load_game_special(unsigned game_type, const struct retro_game_info *info, size_t num_info)
 {
+    size_t outSize = 0;
+    bool result = false;
+    void* gameBuffer = NULL;
+
     if(retro_dd_path_img)
     {
         free(retro_dd_path_img);
@@ -417,8 +421,23 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
             }
             
             log_cb(RETRO_LOG_INFO, "Loading %s...\n", info[0].path);
-            load_file(info[1].path, (void**)&info[1].data, &info[1].size);
-            return retro_load_game(&info[1]);
+            
+            result = load_file(info[1].path, &gameBuffer, &outSize) == file_ok;
+            if(result)
+            {
+               memcpy(&info[1].data, &gameBuffer, sizeof(void*));
+               memcpy(&info[1].size, &outSize, sizeof(size_t));
+               result = result && retro_load_game(&info[1]);
+               
+               if(gameBuffer)
+               {
+                  free(gameBuffer);
+                  gameBuffer = NULL;
+                  // To prevent potential double free // TODO: revisit later
+                  memcpy(&info[1].data, &gameBuffer, sizeof(void*));
+               }
+            }
+            break;
         case RETRO_GAME_TYPE_TRANSFERPAK:
             if(num_info == 3)
             {
@@ -428,14 +447,29 @@ bool retro_load_game_special(unsigned game_type, const struct retro_game_info *i
                 return false;
             }
             
+            log_cb(RETRO_LOG_INFO, "Loading %s...\n", info[0].path);
+            log_cb(RETRO_LOG_INFO, "Loading %s...\n", info[1].path);
             log_cb(RETRO_LOG_INFO, "Loading %s...\n", info[2].path);
-            load_file(info[2].path, (void**)&info[2].data, &info[2].size);
-            return retro_load_game(&info[2]);
+            result = load_file(info[2].path, &gameBuffer, &outSize) == file_ok;
+            if(result)
+            {
+               memcpy(&info[2].data, &gameBuffer, sizeof(void*));
+               memcpy(&info[2].size, &outSize, sizeof(size_t));
+               result = result && retro_load_game(&info[2]);
+               if(gameBuffer)
+               {
+                  free(gameBuffer);
+                  gameBuffer = NULL;
+                  // To prevent potential double free // TODO: revisit later
+                  memcpy(&info[2].data, &gameBuffer, sizeof(void*));
+               }
+            }
+            break;
         default:
             return false;
     }
-    
-	return false;
+
+	 return result;
 }
 
 void retro_set_environment(retro_environment_t cb)
@@ -444,26 +478,30 @@ void retro_set_environment(retro_environment_t cb)
 
     static const struct retro_subsystem_memory_info memory_info_dd[] = {
         { "srm", RETRO_MEMORY_DD },
+        {}
     };
 
     static const struct retro_subsystem_memory_info memory_info_transferpak[] = {
-        { "ram", RETRO_MEMORY_TRANSFERPAK },
+        { "srm", RETRO_MEMORY_TRANSFERPAK },
+        {}
     };
 
     static const struct retro_subsystem_rom_info dd_roms[] = {
         { "Disk", "ndd", true, false, true, memory_info_dd, 1 },
         { "Cartridge", "n64|v64|z64|bin|u1", true, false, true, NULL, 0 },
+        {}
     };
 
     static const struct retro_subsystem_rom_info transferpak_roms[] = {
-        { "Gameboy RAM", "ram|sav", true, false, true, memory_info_transferpak, 0 },
-        { "Gameboy ROM", "rom|gb", true, false, true, memory_info_transferpak, 0 },
-        { "Cartridge", "n64|v64|z64|bin|u1", true, false, true, NULL, 1 },
+        { "Gameboy RAM", "ram|sav", true, false, true, NULL, 0 },
+        { "Gameboy ROM", "rom|gb|gbc", true, false, true, NULL, 0 },
+        { "Cartridge", "n64|v64|z64|bin|u1", true, false, true, memory_info_transferpak, 1 },
+        {}
     };
 
     static const struct retro_subsystem_info subsystems[] = {
         { "N64 Disk Drive", "ndd", dd_roms, 2, RETRO_GAME_TYPE_DD },
-        //{ "N64 Transferpak", "gb", transferpak_roms, 3, RETRO_GAME_TYPE_TRANSFERPAK },
+        { "N64 Transferpak", "gb", transferpak_roms, 3, RETRO_GAME_TYPE_TRANSFERPAK },
         {}
     };
 
